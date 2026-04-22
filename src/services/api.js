@@ -4,7 +4,7 @@
 import axios from "axios";
 
 const API = axios.create({
-    baseURL: "https://patient-management-system-backend-f6rr.onrender.com/api",
+    baseURL: "https://patient-management-system-backend-1.onrender.com/api",
     headers: { "Content-Type": "application/json" },
 });
 
@@ -33,6 +33,6 @@ export const getReports = (patientId) =>
 export const deleteReport = (id) => API.delete(`/reports/${id}`);
 
 export const getReportFileUrl = (filename) =>
-    `https://patient-management-system-backend-f6rr.onrender.com/api/reports/file/${filename}`;
+    `https://patient-management-system-backend-1.onrender.com/api/reports/file/${filename}`;
 
 export default API;
