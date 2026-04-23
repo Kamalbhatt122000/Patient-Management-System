@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import DatePicker from "react-datepicker";
 import { toast } from "react-toastify";
 import {
-    FiCalendar, FiCheckCircle, FiArrowLeft, FiTrash2, FiClock,
+    FiCalendar, FiCheckCircle, FiArrowLeft, FiTrash2, FiClock, FiZap,
 } from "react-icons/fi";
 import {
-    getPatients, getDoctors, getTimeSlots, bookAppointment,
+    getPatients, getDoctors, bookAppointment,
     getAppointments, cancelAppointment,
 } from "../services/api";
 
@@ -20,19 +20,19 @@ export default function AppointmentBooking() {
     const [tab, setTab] = useState("book"); // "book" | "list"
 
     const [form, setForm] = useState({
-        patient_id: "", doctor: "", date: null, time: "", reason: "",
+        patient_id: "", doctor_sf_id: "", doctor_name: "", date: null, time: "", reason: "",
     });
     const [errors, setErrors] = useState({});
+    const [selectedDoctor, setSelectedDoctor] = useState(null);
 
     useEffect(() => {
         async function load() {
             try {
-                const [pRes, dRes, tRes, aRes] = await Promise.all([
-                    getPatients(), getDoctors(), getTimeSlots(), getAppointments(),
+                const [pRes, dRes, aRes] = await Promise.all([
+                    getPatients(), getDoctors(), getAppointments(),
                 ]);
                 setPatients(pRes.data.patients || []);
                 setDoctors(dRes.data.doctors || []);
-                setTimeSlots(tRes.data.time_slots || []);
                 setAppointments(aRes.data.appointments || []);
             } catch {
                 toast.error("Failed to load data");
@@ -43,10 +43,32 @@ export default function AppointmentBooking() {
         load();
     }, []);
 
+    // When doctor changes, update time slots from their availability
+    const handleDoctorChange = (e) => {
+        const doctorId = e.target.value;
+        const doctor = doctors.find((d) => d.id === doctorId);
+
+        if (doctor) {
+            setSelectedDoctor(doctor);
+            setTimeSlots(doctor.slots || []);
+            setForm({
+                ...form,
+                doctor_sf_id: doctor.id,
+                doctor_name: doctor.name,
+                time: "", // reset time when doctor changes
+            });
+        } else {
+            setSelectedDoctor(null);
+            setTimeSlots([]);
+            setForm({ ...form, doctor_sf_id: "", doctor_name: "", time: "" });
+        }
+        setErrors({ ...errors, doctor_sf_id: "" });
+    };
+
     const validate = () => {
         const errs = {};
         if (!form.patient_id) errs.patient_id = "Select a patient";
-        if (!form.doctor) errs.doctor = "Select a doctor";
+        if (!form.doctor_sf_id) errs.doctor_sf_id = "Select a doctor";
         if (!form.date) errs.date = "Pick a date";
         if (!form.time) errs.time = "Select a time slot";
         if (!form.reason.trim()) errs.reason = "Enter visit reason";
@@ -67,7 +89,7 @@ export default function AppointmentBooking() {
             const res = await bookAppointment(payload);
             setSuccess(res.data.appointment);
             setAppointments((prev) => [res.data.appointment, ...prev]);
-            toast.success("Appointment booked!");
+            toast.success("Appointment booked & synced to Salesforce!");
         } catch (err) {
             toast.error(err.response?.data?.error || "Booking failed");
         } finally {
@@ -87,9 +109,11 @@ export default function AppointmentBooking() {
     };
 
     const resetForm = () => {
-        setForm({ patient_id: "", doctor: "", date: null, time: "", reason: "" });
+        setForm({ patient_id: "", doctor_sf_id: "", doctor_name: "", date: null, time: "", reason: "" });
         setSuccess(null);
         setErrors({});
+        setSelectedDoctor(null);
+        setTimeSlots([]);
     };
 
     if (loading) {
@@ -106,7 +130,7 @@ export default function AppointmentBooking() {
             <div className="page-header">
                 <div>
                     <h2><FiCalendar style={{ color: "var(--primary-500)" }} /> Appointments</h2>
-                    <p className="page-header-subtitle">Book and manage patient appointments</p>
+                    <p className="page-header-subtitle">Book and manage patient appointments — <FiZap style={{ display: "inline", verticalAlign: "middle", color: "var(--accent-500)" }} /> Connected to Salesforce</p>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                     <button
@@ -126,12 +150,25 @@ export default function AppointmentBooking() {
                         <div className="card success-card">
                             <div className="success-icon"><FiCheckCircle /></div>
                             <h3 style={{ fontSize: 22, marginBottom: 8 }}>Appointment Booked!</h3>
-                            <p style={{ color: "var(--text-secondary)", marginBottom: 20 }}>
+                            <p style={{ color: "var(--text-secondary)", marginBottom: 12 }}>
                                 {success.patient_name} with {success.doctor} on {success.date} at {success.time}
                             </p>
-                            <button className="btn btn-primary" onClick={resetForm}>
-                                <FiArrowLeft /> Book Another
-                            </button>
+                            {success.salesforce_id && (
+                                <div className="sf-sync-badge" style={{
+                                    display: "inline-flex", alignItems: "center", gap: 6,
+                                    background: "var(--accent-50)", color: "var(--accent-600)",
+                                    padding: "6px 16px", borderRadius: "var(--radius-full)",
+                                    fontSize: 13, fontWeight: 600, marginBottom: 20,
+                                    border: "1px solid rgba(0, 189, 135, 0.2)",
+                                }}>
+                                    <FiZap /> Synced to Salesforce
+                                </div>
+                            )}
+                            <div>
+                                <button className="btn btn-primary" onClick={resetForm}>
+                                    <FiArrowLeft /> Book Another
+                                </button>
+                            </div>
                         </div>
                     ) : (
                         <div className="card">
@@ -158,19 +195,42 @@ export default function AppointmentBooking() {
                                             {errors.patient_id && <span className="form-error">{errors.patient_id}</span>}
                                         </div>
 
-                                        {/* Doctor */}
+                                        {/* Doctor (from Salesforce) */}
                                         <div className="form-group">
-                                            <label>Doctor <span className="required">*</span></label>
-                                            <select className={`form-control ${errors.doctor ? "error" : ""}`}
-                                                value={form.doctor}
-                                                onChange={(e) => { setForm({ ...form, doctor: e.target.value }); setErrors({ ...errors, doctor: "" }); }}>
+                                            <label>Doctor <span className="required">*</span> <span style={{ fontSize: 11, color: "var(--accent-500)", fontWeight: 400 }}>⚡ Salesforce</span></label>
+                                            <select className={`form-control ${errors.doctor_sf_id ? "error" : ""}`}
+                                                value={form.doctor_sf_id}
+                                                onChange={handleDoctorChange}>
                                                 <option value="">Select doctor</option>
                                                 {doctors.map((d) => (
-                                                    <option key={d.id} value={d.name}>{d.name} — {d.specialty}</option>
+                                                    <option key={d.id} value={d.id}>{d.name} — {d.specialty}</option>
                                                 ))}
                                             </select>
-                                            {errors.doctor && <span className="form-error">{errors.doctor}</span>}
+                                            {errors.doctor_sf_id && <span className="form-error">{errors.doctor_sf_id}</span>}
                                         </div>
+
+                                        {/* Doctor Availability Info */}
+                                        {selectedDoctor && (
+                                            <div className="form-group full-width">
+                                                <div style={{
+                                                    padding: "12px 16px",
+                                                    background: "var(--accent-50)",
+                                                    borderRadius: "var(--radius-md)",
+                                                    border: "1px solid rgba(0, 189, 135, 0.15)",
+                                                    fontSize: 13,
+                                                    color: "var(--accent-700)",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: 8,
+                                                }}>
+                                                    <FiClock />
+                                                    <strong>{selectedDoctor.name}</strong> is available from&nbsp;
+                                                    <strong>{selectedDoctor.available_from?.split(".")[0] || "N/A"}</strong> to&nbsp;
+                                                    <strong>{selectedDoctor.available_to?.split(".")[0] || "N/A"}</strong>
+                                                    &nbsp;— {timeSlots.length} slots available
+                                                </div>
+                                            </div>
+                                        )}
 
                                         {/* Date */}
                                         <div className="form-group">
@@ -186,13 +246,18 @@ export default function AppointmentBooking() {
                                             {errors.date && <span className="form-error">{errors.date}</span>}
                                         </div>
 
-                                        {/* Time */}
+                                        {/* Time (dynamic from doctor availability) */}
                                         <div className="form-group">
                                             <label>Time Slot <span className="required">*</span></label>
                                             <select className={`form-control ${errors.time ? "error" : ""}`}
                                                 value={form.time}
-                                                onChange={(e) => { setForm({ ...form, time: e.target.value }); setErrors({ ...errors, time: "" }); }}>
-                                                <option value="">Select time</option>
+                                                onChange={(e) => { setForm({ ...form, time: e.target.value }); setErrors({ ...errors, time: "" }); }}
+                                                disabled={timeSlots.length === 0}>
+                                                <option value="">
+                                                    {form.doctor_sf_id
+                                                        ? timeSlots.length > 0 ? "Select time" : "No slots available"
+                                                        : "Select a doctor first"}
+                                                </option>
                                                 {timeSlots.map((t) => (
                                                     <option key={t} value={t}>{t}</option>
                                                 ))}
@@ -236,7 +301,7 @@ export default function AppointmentBooking() {
                                     <thead>
                                         <tr>
                                             <th>Patient</th><th>Doctor</th><th>Date</th><th>Time</th>
-                                            <th>Reason</th><th>Status</th><th>Actions</th>
+                                            <th>Reason</th><th>Status</th><th>SF Sync</th><th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -250,6 +315,18 @@ export default function AppointmentBooking() {
                                                     {a.reason}
                                                 </td>
                                                 <td><span className="badge badge-status">{a.status}</span></td>
+                                                <td>
+                                                    {a.salesforce_id ? (
+                                                        <span style={{
+                                                            display: "inline-flex", alignItems: "center", gap: 4,
+                                                            fontSize: 11, color: "var(--accent-600)", fontWeight: 600,
+                                                        }}>
+                                                            <FiZap /> Synced
+                                                        </span>
+                                                    ) : (
+                                                        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>—</span>
+                                                    )}
+                                                </td>
                                                 <td>
                                                     <button className="btn btn-sm btn-danger" onClick={() => handleCancel(a.id)}>
                                                         <FiTrash2 /> Cancel

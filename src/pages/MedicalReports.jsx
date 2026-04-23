@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "react-toastify";
 import {
     FiFileText, FiUploadCloud, FiTrash2, FiDownload, FiFile, FiImage,
+    FiZap, FiRefreshCw, FiCloud, FiMonitor,
 } from "react-icons/fi";
 import {
     getPatients, uploadReport, getReports, deleteReport, getReportFileUrl,
@@ -13,17 +14,24 @@ export default function MedicalReports() {
     const [selectedPatient, setSelectedPatient] = useState("");
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     const [reportName, setReportName] = useState("");
     const [selectedFile, setSelectedFile] = useState(null);
     const [dragOver, setDragOver] = useState(false);
+    const [sfStats, setSfStats] = useState({ local: 0, sf: 0 });
     const fileRef = useRef(null);
 
+    // Initial load
     useEffect(() => {
         async function load() {
             try {
                 const [pRes, rRes] = await Promise.all([getPatients(), getReports()]);
                 setPatients(pRes.data.patients || []);
                 setReports(rRes.data.reports || []);
+                setSfStats({
+                    local: rRes.data.local_count || 0,
+                    sf: rRes.data.sf_count || 0,
+                });
             } catch {
                 toast.error("Failed to load data");
             } finally {
@@ -33,8 +41,36 @@ export default function MedicalReports() {
         load();
     }, []);
 
+    // Refresh reports when patient changes (triggers SF file fetch)
+    const fetchReports = useCallback(async (patientId) => {
+        setSyncing(true);
+        try {
+            const res = await getReports(patientId || undefined);
+            setReports(res.data.reports || []);
+            setSfStats({
+                local: res.data.local_count || 0,
+                sf: res.data.sf_count || 0,
+            });
+        } catch {
+            toast.error("Failed to refresh reports");
+        } finally {
+            setSyncing(false);
+        }
+    }, []);
+
+    const handlePatientChange = (e) => {
+        const pid = e.target.value;
+        setSelectedPatient(pid);
+        fetchReports(pid);
+    };
+
+    const handleRefresh = () => {
+        fetchReports(selectedPatient);
+        toast.info("Syncing with Salesforce...");
+    };
+
     const filteredReports = selectedPatient
-        ? reports.filter((r) => r.patient_id === selectedPatient)
+        ? reports.filter((r) => r.patient_id === selectedPatient || r.source === "salesforce")
         : reports;
 
     const handleFileSelect = (file) => {
@@ -60,11 +96,17 @@ export default function MedicalReports() {
             fd.append("file", selectedFile);
             fd.append("report_name", reportName || selectedFile.name);
             const res = await uploadReport(fd);
-            setReports((prev) => [res.data.report, ...prev]);
+            const newReport = res.data.report;
+            setReports((prev) => [newReport, ...prev]);
             setSelectedFile(null);
             setReportName("");
             if (fileRef.current) fileRef.current.value = "";
-            toast.success("Report uploaded!");
+
+            if (newReport.sf_synced) {
+                toast.success("Report uploaded & synced to Salesforce!");
+            } else {
+                toast.success("Report uploaded locally (Salesforce sync pending)");
+            }
         } catch (err) {
             toast.error(err.response?.data?.error || "Upload failed");
         } finally {
@@ -72,18 +114,63 @@ export default function MedicalReports() {
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!confirm("Delete this report?")) return;
+    const handleDelete = async (report) => {
+        const label = report.source === "salesforce" ? "Salesforce" : "local";
+        if (!confirm(`Delete this ${label} report?`)) return;
         try {
-            await deleteReport(id);
-            setReports((prev) => prev.filter((r) => r.id !== id));
-            toast.success("Report deleted");
+            await deleteReport(report.id);
+            setReports((prev) => prev.filter((r) => r.id !== report.id));
+            toast.success(`Report deleted from ${label}`);
         } catch {
             toast.error("Delete failed");
         }
     };
 
     const isImage = (type) => ["png", "jpg", "jpeg", "gif", "bmp", "webp"].includes(type);
+
+    const getDownloadUrl = (report) => {
+        return getReportFileUrl(report);
+    };
+
+    const getSourceBadge = (report) => {
+        if (report.source === "salesforce") {
+            return (
+                <span style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    fontSize: 11, fontWeight: 600, padding: "2px 8px",
+                    borderRadius: "var(--radius-full)",
+                    background: "#e0f2fe", color: "#0369a1",
+                    border: "1px solid rgba(3, 105, 161, 0.15)",
+                }}>
+                    <FiCloud /> Salesforce
+                </span>
+            );
+        }
+        if (report.sf_synced) {
+            return (
+                <span style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    fontSize: 11, fontWeight: 600, padding: "2px 8px",
+                    borderRadius: "var(--radius-full)",
+                    background: "var(--accent-50)", color: "var(--accent-600)",
+                    border: "1px solid rgba(0, 189, 135, 0.15)",
+                }}>
+                    <FiZap /> Synced
+                </span>
+            );
+        }
+        return (
+            <span style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                fontSize: 11, fontWeight: 600, padding: "2px 8px",
+                borderRadius: "var(--radius-full)",
+                background: "var(--bg-surface-2)", color: "var(--text-tertiary)",
+                border: "1px solid var(--border-light)",
+            }}>
+                <FiMonitor /> Local
+            </span>
+        );
+    };
 
     if (loading) {
         return (
@@ -99,8 +186,19 @@ export default function MedicalReports() {
             <div className="page-header">
                 <div>
                     <h2><FiFileText style={{ color: "var(--primary-500)" }} /> Medical Reports</h2>
-                    <p className="page-header-subtitle">Upload and view patient medical reports</p>
+                    <p className="page-header-subtitle">
+                        Upload and view patient reports — <FiZap style={{ display: "inline", verticalAlign: "middle", color: "var(--accent-500)" }} /> Bidirectional Salesforce sync
+                    </p>
                 </div>
+                <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={handleRefresh}
+                    disabled={syncing}
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                >
+                    <FiRefreshCw style={syncing ? { animation: "spin 1s linear infinite" } : {}} />
+                    {syncing ? "Syncing..." : "Sync with SF"}
+                </button>
             </div>
 
             <div className="page-content">
@@ -110,14 +208,31 @@ export default function MedicalReports() {
                         <div className="form-group">
                             <label>Select Patient</label>
                             <select className="form-control" value={selectedPatient}
-                                onChange={(e) => setSelectedPatient(e.target.value)}>
+                                onChange={handlePatientChange}>
                                 <option value="">All patients</option>
                                 {patients.map((p) => (
-                                    <option key={p.id} value={p.id}>{p.first_name} {p.last_name} — {p.email}</option>
+                                    <option key={p.id} value={p.id}>
+                                        {p.first_name} {p.last_name} — {p.email}
+                                        {p.salesforce_id ? " ⚡" : ""}
+                                    </option>
                                 ))}
                             </select>
                         </div>
                     </div>
+                    {/* Sync status bar */}
+                    {selectedPatient && (
+                        <div style={{
+                            marginTop: 12, display: "flex", gap: 16, fontSize: 13,
+                            color: "var(--text-secondary)", alignItems: "center",
+                        }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <FiMonitor /> {sfStats.local} local
+                            </span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <FiCloud style={{ color: "var(--primary-500)" }} /> {sfStats.sf} from Salesforce
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Upload area */}
@@ -125,6 +240,12 @@ export default function MedicalReports() {
                     <div className="card" style={{ marginBottom: 20 }}>
                         <div className="card-header">
                             <h3><FiUploadCloud /> Upload Report</h3>
+                            <span style={{
+                                fontSize: 12, color: "var(--accent-600)",
+                                display: "flex", alignItems: "center", gap: 4,
+                            }}>
+                                <FiZap /> Auto-syncs to Salesforce Files
+                            </span>
                         </div>
 
                         <div className="form-group" style={{ marginBottom: 16 }}>
@@ -157,7 +278,7 @@ export default function MedicalReports() {
 
                         <div style={{ marginTop: 16 }}>
                             <button className="btn btn-primary" onClick={handleUpload} disabled={uploading || !selectedFile}>
-                                <FiUploadCloud /> {uploading ? "Uploading..." : "Upload Report"}
+                                <FiUploadCloud /> {uploading ? "Uploading & Syncing..." : "Upload Report"}
                             </button>
                         </div>
                     </div>
@@ -173,7 +294,9 @@ export default function MedicalReports() {
                         <div className="empty-state">
                             <div className="empty-state-icon"><FiFileText /></div>
                             <h4>No Reports Found</h4>
-                            <p>{selectedPatient ? "This patient has no reports yet." : "No reports have been uploaded."}</p>
+                            <p>{selectedPatient
+                                ? "This patient has no reports yet. Upload one or check Salesforce."
+                                : "No reports have been uploaded."}</p>
                         </div>
                     ) : (
                         <div className="report-list">
@@ -184,23 +307,36 @@ export default function MedicalReports() {
                                     </div>
                                     <div className="report-info">
                                         <h4>{r.report_name || r.original_filename}</h4>
-                                        <p>
-                                            {new Date(r.upload_date).toLocaleDateString("en-US", {
-                                                year: "numeric", month: "short", day: "numeric",
-                                            })} • {r.file_type.toUpperCase()}
-                                            {patients.length > 0 && (() => {
+                                        <p style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                            <span>
+                                                {r.upload_date
+                                                    ? new Date(r.upload_date).toLocaleDateString("en-US", {
+                                                        year: "numeric", month: "short", day: "numeric",
+                                                    })
+                                                    : "Unknown date"}
+                                            </span>
+                                            <span>•</span>
+                                            <span>{(r.file_type || "").toUpperCase()}</span>
+                                            {r.file_size && (
+                                                <>
+                                                    <span>•</span>
+                                                    <span>{(r.file_size / 1024).toFixed(1)} KB</span>
+                                                </>
+                                            )}
+                                            {getSourceBadge(r)}
+                                            {patients.length > 0 && r.patient_id && (() => {
                                                 const pt = patients.find((p) => p.id === r.patient_id);
-                                                return pt ? ` • ${pt.first_name} ${pt.last_name}` : "";
+                                                return pt ? <span>• {pt.first_name} {pt.last_name}</span> : null;
                                             })()}
                                         </p>
                                     </div>
                                     <div className="report-actions">
                                         <a className="btn btn-sm btn-secondary"
-                                            href={getReportFileUrl(r.file_path)}
+                                            href={getDownloadUrl(r)}
                                             target="_blank" rel="noopener noreferrer">
                                             <FiDownload />
                                         </a>
-                                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(r.id)}>
+                                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(r)}>
                                             <FiTrash2 />
                                         </button>
                                     </div>

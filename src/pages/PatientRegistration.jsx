@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "react-toastify";
-import { FiUserPlus, FiCheckCircle, FiArrowLeft } from "react-icons/fi";
+import { FiUserPlus, FiCheckCircle, FiArrowLeft, FiZap } from "react-icons/fi";
 import { registerPatient } from "../services/api";
 
 const initialForm = {
@@ -28,7 +28,6 @@ export default function PatientRegistration() {
         if (!form.gender) errs.gender = "Gender is required";
         if (!form.email.trim() || !/^[^@]+@[^@]+\.[^@]+$/.test(form.email))
             errs.email = "Valid email is required";
-        if (!form.phone.trim()) errs.phone = "Phone is required";
         return errs;
     };
 
@@ -46,7 +45,7 @@ export default function PatientRegistration() {
             };
             const res = await registerPatient(payload);
             setSuccess(res.data.patient);
-            toast.success("Patient registered successfully!");
+            toast.success("Patient registered & synced to Salesforce!");
         } catch (err) {
             const msg = err.response?.data?.error || "Registration failed";
             toast.error(msg);
@@ -75,15 +74,26 @@ export default function PatientRegistration() {
                     <div className="card success-card">
                         <div className="success-icon"><FiCheckCircle /></div>
                         <h3 style={{ fontSize: 22, marginBottom: 8 }}>Patient Registered Successfully!</h3>
-                        <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
+                        <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
                             {success.first_name} {success.last_name} has been added to the system.
                         </p>
-                        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 8 }}>
                             <span className={`badge badge-${success.priority?.toLowerCase()}`} style={{ fontSize: 14, padding: "6px 16px" }}>
                                 Priority: {success.priority}
                             </span>
                         </div>
-                        <div style={{ marginTop: 28 }}>
+                        {success.salesforce_id && (
+                            <div style={{
+                                display: "inline-flex", alignItems: "center", gap: 6,
+                                background: "var(--accent-50)", color: "var(--accent-600)",
+                                padding: "6px 16px", borderRadius: "var(--radius-full)",
+                                fontSize: 13, fontWeight: 600, marginBottom: 20,
+                                border: "1px solid rgba(0, 189, 135, 0.2)",
+                            }}>
+                                <FiZap /> Synced to Salesforce (ID: {success.salesforce_id.substring(0, 15)})
+                            </div>
+                        )}
+                        <div style={{ marginTop: 20 }}>
                             <button className="btn btn-primary" onClick={resetForm}>
                                 <FiArrowLeft /> Register Another Patient
                             </button>
@@ -99,7 +109,7 @@ export default function PatientRegistration() {
             <div className="page-header">
                 <div>
                     <h2><FiUserPlus style={{ color: "var(--primary-500)" }} /> Patient Registration</h2>
-                    <p className="page-header-subtitle">Register a new patient in the system</p>
+                    <p className="page-header-subtitle">Register a new patient — <FiZap style={{ display: "inline", verticalAlign: "middle", color: "var(--accent-500)" }} /> Auto-syncs to Salesforce</p>
                 </div>
             </div>
             <div className="page-content">
@@ -157,11 +167,10 @@ export default function PatientRegistration() {
 
                             {/* Phone */}
                             <div className="form-group">
-                                <label>Phone <span className="required">*</span></label>
-                                <input className={`form-control ${errors.phone ? "error" : ""}`}
+                                <label>Phone</label>
+                                <input className="form-control"
                                     name="phone" value={form.phone} onChange={handleChange}
                                     placeholder="+1 234 567 8900" />
-                                {errors.phone && <span className="form-error">{errors.phone}</span>}
                             </div>
 
                             {/* Address */}
@@ -189,7 +198,7 @@ export default function PatientRegistration() {
                             </div>
                         </div>
 
-                        {/* Triage info */}
+                        {/* Triage + Salesforce info */}
                         <div style={{
                             marginTop: 20, padding: "14px 18px",
                             background: "var(--status-info-bg)", borderRadius: "var(--radius-md)",
@@ -198,6 +207,16 @@ export default function PatientRegistration() {
                         }}>
                             <strong>Triage:</strong> Priority is auto-calculated — <em>chest pain → HIGH</em>,
                             duration &gt; 3 days → MEDIUM, else LOW.
+                        </div>
+
+                        <div style={{
+                            marginTop: 10, padding: "14px 18px",
+                            background: "var(--accent-50)", borderRadius: "var(--radius-md)",
+                            fontSize: 13, color: "var(--accent-700)",
+                            border: "1px solid rgba(0,189,135,0.15)",
+                            display: "flex", alignItems: "center", gap: 8,
+                        }}>
+                            <FiZap /> <strong>Salesforce Sync:</strong> This patient will be automatically created in the Salesforce Patient__c object.
                         </div>
 
                         <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
