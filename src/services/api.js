@@ -4,8 +4,10 @@
  */
 import axios from "axios";
 
+const BASE_URL = "https://patient-management-system-backend-3.onrender.com/api";
+
 const API = axios.create({
-    baseURL: "http://localhost:5000/api",
+    baseURL: BASE_URL,
     headers: { "Content-Type": "application/json" },
 });
 
@@ -44,15 +46,15 @@ export const deleteReport = (id) => API.delete(`/reports/${id}`);
 export const getReportFileUrl = (report) => {
     // If called with a string (legacy), treat as local filename
     if (typeof report === "string") {
-        return `http://localhost:5000/api/reports/file/${report}`;
+        return `${BASE_URL}/reports/file/${report}`;
     }
     // Salesforce-only file: proxy through backend
     if (report.source === "salesforce" && report.content_version_id) {
-        return `http://localhost:5000/api/reports/sf-file/${report.content_version_id}`;
+        return `${BASE_URL}/reports/sf-file/${report.content_version_id}`;
     }
     // Local file with SF sync: use local path
     if (report.file_path) {
-        return `http://localhost:5000/api/reports/file/${report.file_path}`;
+        return `${BASE_URL}/reports/file/${report.file_path}`;
     }
     // Fallback
     return "#";
