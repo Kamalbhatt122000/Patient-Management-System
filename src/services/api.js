@@ -4,7 +4,13 @@
  */
 import axios from "axios";
 
-const BASE_URL = "https://patient-management-system-backend-3.onrender.com/api";
+// Override per-environment via frontend/.env.local (VITE_API_BASE_URL=...).
+// Default points at the deployed Render backend so production builds keep working
+// without any env config. For local dev, create frontend/.env.local with:
+//   VITE_API_BASE_URL=http://localhost:5000/api
+const BASE_URL =
+    import.meta.env.VITE_API_BASE_URL ||
+    "https://patient-management-system-backend-3.onrender.com/api";
 
 const API = axios.create({
     baseURL: BASE_URL,
